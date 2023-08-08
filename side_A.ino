@@ -1,24 +1,25 @@
 // IMPORTANT: define 'true' if this mcu lives inside of Box A, which is the wooden unit.
 // define 'false' if this mcu lives inside of Box B, which is the black bakelite dial unit.
-#define IS_SIDE_A false
+#define IS_SIDE_A true
 
 #include <MD_YX5300.h>
 #include <SoftwareSerial.h>
-#include <ButtonDebounce.h>
+#include <ButtonDebounce.h> // with edited constructor for pullup override 
 
 // IO Constants
 const short mp3_rx = 8; // D8 - connect to TX of MP3 Player module
 const short mp3_tx = 7; // D7 - connect to RX of MP3 Player module
-const short internal_on_hook_pin = 6; // D6 - internal on-hold input
+const short internal_on_hook_pin_input = 6; // D6 - internal on-hold input
+const short internal_off_hook_pin_output = 3; // D3 - internal on-hold output
 const short external_on_hook_pin = 9; // D9 - external on-hold input
 const short relay_audio_out_pin = 4; // D4 - relay coil for audio output
 const short relay_audio_in_pin = 5; // D5 - relay coil for audio input
 
-const short debounce_ms = 100;
+const short debounce_ms = 125;
 
 // IO Objects
-ButtonDebounce internalOH(internal_on_hook_pin, debounce_ms);
-ButtonDebounce externalOH(external_on_hook_pin, debounce_ms);
+ButtonDebounce internalOH(internal_on_hook_pin_input, debounce_ms);
+ButtonDebounce externalOH(external_on_hook_pin, debounce_ms, INPUT); // override INPUT_PULLUP
 
 
 // MP3 Objects
@@ -49,12 +50,16 @@ HookState lastHookState = HookState::Open;
 void setup()
 {
   Serial.begin(9600);
-  Serial.println("PaniQ Telephone Control Board A");
+  if(IS_SIDE_A)
+    Serial.println("PaniQ Telephone Control Board A");
+  else
+    Serial.println("PaniQ Telephone Control Board B");
 
   // Pin setup
   pinMode(relay_audio_in_pin, OUTPUT);
   pinMode(relay_audio_out_pin, OUTPUT);
-  // OH pins set to INTERNAL_PULLUP by ButtonDebounce constructor
+  pinMode(internal_off_hook_pin_output, OUTPUT);
+  // OH input pins set to INTERNAL_PULLUP by ButtonDebounce constructor
 
   internalOH.setCallback([](const int state) {Serial.println("Internal = " + String(state));});
   externalOH.setCallback([](const int state) {Serial.println("External = " + String(state));});
@@ -118,19 +123,18 @@ void handleNewHookState(HookState state) {
 
 HookState checkHookState(){
   bool internal;
-  bool external;
+  bool external = externalOH.state();
 
   if (IS_SIDE_A){
     internal = !internalOH.state();
-    external = externalOH.state();
   } else {
     internal = internalOH.state();
-    external = !externalOH.state();
   }
-  
 
-  if ( internal && external ) return HookState::Open;
-  if ( internal && !external ) return HookState::BeingCalled;
-  if ( !internal && external ) return HookState::Calling;
-  return HookState::Closed;
+  digitalWrite(internal_off_hook_pin_output, !internal);
+
+  if ( internal && external ) return HookState::BeingCalled;
+  if ( internal && !external ) return HookState::Open; 
+  if ( !internal && external ) return HookState::Closed; 
+  return HookState::Calling; 
 }
